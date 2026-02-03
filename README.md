@@ -411,8 +411,44 @@ notion-knowledge-graph/
 
 ## 향후 계획
 
+### Phase 5: 코드베이스 임베딩 (진행 예정)
+
+Notion 문서뿐만 아니라 **소스코드**도 벡터 DB에 임베딩하여 통합 지식 그래프 구축
+
+```
+┌─────────────┐         ┌─────────────┐         ┌─────────────┐
+│   Notion    │         │   Vector    │         │    Your     │
+│   Pages     │────────▶│     DB      │◀────────│  Codebase   │
+│  (1,152)    │         │  (Qdrant)   │         │ (N files)   │
+└─────────────┘         └─────────────┘         └─────────────┘
+```
+
+**활용 시나리오:**
+- 자연어 코드 검색: "사용자 인증 처리하는 코드"
+- 유사 코드 패턴 발견
+- 기획 문서 ↔ 코드 매핑
+- 모듈 의존성 그래프
+
+**새로운 노드/관계:**
+```cypher
+// 코드 파일 노드
+(:CodeFile {
+  path: "/Sources/Features/Login/LoginViewController.swift",
+  module: "Features",
+  lines: 250
+})
+
+// 문서 ↔ 코드 연결
+(page:Page)-[:RELATES_TO {score: 0.75}]->(code:CodeFile)
+```
+
+### Phase 6: MCP 서버 연동
+
+Claude Code에서 직접 지식 그래프를 쿼리할 수 있도록 MCP 서버 구축
+
+### 기타 계획
+
 - [ ] **개념 노드 추출**: LLM으로 페이지에서 주요 개념 추출 → Concept 노드로 연결
-- [ ] **MCP 서버**: Claude Code와 직접 연동
 - [ ] **자동 동기화**: Notion 변경 시 자동 업데이트 (Webhook)
 - [ ] **Neo4j Bloom**: 고급 시각화 대시보드
 
