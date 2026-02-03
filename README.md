@@ -1,6 +1,14 @@
 # Notion Knowledge Graph
 
-개인 Notion 데이터를 **벡터 DB + 그래프 DB**로 변환하여 새로운 인사이트를 발견하는 프로젝트입니다.
+개인 **Notion 데이터 + 코드베이스**를 **벡터 DB + 그래프 DB**로 변환하여 새로운 인사이트를 발견하는 프로젝트입니다.
+
+## 📊 현재 상태
+
+| 데이터 | 항목 수 | 벡터 | SIMILAR_TO 관계 |
+|--------|---------|------|-----------------|
+| **Notion Pages** | 1,152 | ✅ 1024D | 1,743 |
+| **Swift Files** | 2,255 | ✅ 1024D | 13,067 |
+| **합계** | 3,407 | ✅ | 14,810 |
 
 ```
                  ┌─────────────────────────────────────────────────────┐
@@ -31,8 +39,9 @@
 ## 주요 기능
 
 - **Notion 데이터 추출**: 모든 페이지와 블록 콘텐츠를 JSON으로 저장
+- **코드베이스 임베딩**: Swift/ObjC 소스코드를 벡터화하여 의미 검색
 - **벡터 임베딩**: BGE-M3 (다국어 지원)로 1024차원 벡터 생성
-- **의미 기반 유사도**: 코사인 유사도로 관련 페이지 자동 연결
+- **의미 기반 유사도**: 코사인 유사도로 관련 페이지/코드 자동 연결
 - **그래프 시각화**: Neo4j Browser에서 지식 그래프 탐색
 - **하이브리드 검색**: 벡터 검색 + 그래프 확장
 
@@ -400,7 +409,9 @@ notion-knowledge-graph/
 │   ├── vector_store.py      # Phase 2: JSON → Qdrant
 │   ├── graph_builder.py     # Phase 3: JSON → Neo4j
 │   ├── similarity_edges.py  # Phase 4: Qdrant → Neo4j (SIMILAR_TO)
-│   └── explore_insights.py  # Phase 5: 인사이트 탐색
+│   ├── explore_insights.py  # 인사이트 탐색
+│   ├── code_embedder.py     # Phase 5a: Code → Qdrant
+│   └── code_graph_builder.py # Phase 5b: Code → Neo4j
 │
 └── data/                    # (git 제외) 추출된 데이터
     ├── pages.json
@@ -409,48 +420,122 @@ notion-knowledge-graph/
 
 ---
 
+## 코드베이스 그래프 (Phase 5 ✅)
+
+### 노드 및 관계
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   CODE GRAPH SCHEMA                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Nodes:                                                      │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ (:CodeFile)                                          │   │
+│  │   - path: string (파일 경로)                         │   │
+│  │   - name: string (파일명)                            │   │
+│  │   - module: string (모듈/폴더)                       │   │
+│  │   - lines: integer (라인 수)                         │   │
+│  │   - size: integer (바이트)                           │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ (:Module)                                            │   │
+│  │   - name: string (모듈명)                            │   │
+│  │   - fileCount: integer                               │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  Relationships:                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ [:SIMILAR_TO]  - 벡터 유사도 (score >= 0.75)        │   │
+│  │ [:BELONGS_TO]  - 파일 → 모듈 소속                    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 코드 그래프 실행
+
+```bash
+# Phase 5a: 코드 임베딩 (Qdrant)
+python scripts/code_embedder.py --repo /path/to/your/codebase
+
+# Phase 5b: 그래프 구축 (Neo4j)
+python scripts/code_graph_builder.py
+```
+
+### 코드 쿼리 예제 (Neo4j Browser)
+
+#### 1. 허브 파일 (가장 많이 연결된 코드)
+```cypher
+MATCH (c:CodeFile)-[r:SIMILAR_TO]-()
+RETURN c.name, c.module, count(r) as connections
+ORDER BY connections DESC
+LIMIT 15
+```
+
+#### 2. 고유사도 파일 쌍 (중복 의심, 95%+)
+```cypher
+MATCH (c1:CodeFile)-[r:SIMILAR_TO]->(c2:CodeFile)
+WHERE r.score > 0.95
+RETURN c1.name, c2.name, r.score
+ORDER BY r.score DESC
+LIMIT 20
+```
+
+#### 3. 특정 파일과 유사한 코드
+```cypher
+MATCH (c:CodeFile {name: "LoginViewController.swift"})-[r:SIMILAR_TO]->(similar:CodeFile)
+RETURN similar.name, similar.module, r.score
+ORDER BY r.score DESC
+LIMIT 10
+```
+
+#### 4. 모듈별 파일 수
+```cypher
+MATCH (c:CodeFile)
+RETURN c.module, count(*) as files
+ORDER BY files DESC
+```
+
+#### 5. 특정 모듈 내 유사 클러스터
+```cypher
+MATCH (c1:CodeFile)-[r:SIMILAR_TO]->(c2:CodeFile)
+WHERE c1.module = "Views" AND c2.module = "Views"
+AND r.score > 0.85
+RETURN c1, r, c2
+LIMIT 50
+```
+
+#### 6. Reactor 패턴 파일 네트워크
+```cypher
+MATCH (c1:CodeFile)-[r:SIMILAR_TO]->(c2:CodeFile)
+WHERE c1.name CONTAINS "Reactor" AND c2.name CONTAINS "Reactor"
+AND r.score > 0.8
+RETURN c1, r, c2
+LIMIT 40
+```
+
+#### 7. 모듈 간 연결 (Views ↔ ViewControllers)
+```cypher
+MATCH (v:CodeFile)-[r:SIMILAR_TO]->(vc:CodeFile)
+WHERE v.module = "Views" AND vc.module = "View Controllers"
+AND r.score > 0.8
+RETURN v, r, vc
+LIMIT 30
+```
+
+---
+
 ## 향후 계획
 
-### Phase 5: 코드베이스 임베딩 (진행 예정)
+### 선택적 확장
 
-Notion 문서뿐만 아니라 **소스코드**도 벡터 DB에 임베딩하여 통합 지식 그래프 구축
-
-```
-┌─────────────┐         ┌─────────────┐         ┌─────────────┐
-│   Notion    │         │   Vector    │         │    Your     │
-│   Pages     │────────▶│     DB      │◀────────│  Codebase   │
-│  (1,152)    │         │  (Qdrant)   │         │ (N files)   │
-└─────────────┘         └─────────────┘         └─────────────┘
-```
-
-**활용 시나리오:**
-- 자연어 코드 검색: "사용자 인증 처리하는 코드"
-- 유사 코드 패턴 발견
-- 기획 문서 ↔ 코드 매핑
-- 모듈 의존성 그래프
-
-**새로운 노드/관계:**
-```cypher
-// 코드 파일 노드
-(:CodeFile {
-  path: "/Sources/Features/Login/LoginViewController.swift",
-  module: "Features",
-  lines: 250
-})
-
-// 문서 ↔ 코드 연결
-(page:Page)-[:RELATES_TO {score: 0.75}]->(code:CodeFile)
-```
-
-### Phase 6: MCP 서버 연동
-
-Claude Code에서 직접 지식 그래프를 쿼리할 수 있도록 MCP 서버 구축
-
-### 기타 계획
-
-- [ ] **개념 노드 추출**: LLM으로 페이지에서 주요 개념 추출 → Concept 노드로 연결
+- [ ] **MCP 서버 연동**: Claude Code에서 직접 그래프 쿼리
+- [ ] **개념 노드 추출**: LLM으로 주요 개념 추출 → Concept 노드
 - [ ] **자동 동기화**: Notion 변경 시 자동 업데이트 (Webhook)
 - [ ] **Neo4j Bloom**: 고급 시각화 대시보드
+- [ ] **Notion ↔ Code 연결**: 기획 문서와 코드 파일 매핑
 
 ---
 
