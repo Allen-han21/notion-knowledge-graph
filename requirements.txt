@@ -1,0 +1,16 @@
+# Notion API
+notion-client>=2.7.0
+
+# Vector Embedding (BGE-M3)
+FlagEmbedding>=1.3.0
+torch>=2.0.0
+
+# Vector Database
+qdrant-client>=1.16.0
+
+# Graph Database
+neo4j>=5.20.0
+
+# Utilities
+tqdm>=4.66.0
+python-dotenv>=1.0.0
